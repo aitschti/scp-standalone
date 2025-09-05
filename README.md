@@ -12,7 +12,7 @@ This project provides a standalone proxy server for streaming from the Stripchat
 
 1. **Install Dependencies**: Ensure you have Python installed along with any required libraries. You may need to install additional packages depending on your environment.
 
-2. **Set Up the Key**: Create a `key.txt` file in the project directory and add your decryption key. This key is essential for the proxy to function correctly with encrypted playlist files.
+2. **Set Up the Key**: Open `key.txt` file in the project directory and add your decryption key. This key is essential for the proxy to function correctly with encrypted playlist files.
 
 3. **Run the Proxy**:
    - **With a Default Username**: Open a terminal and navigate to the project directory. Start the proxy with a username to set a default stream:
