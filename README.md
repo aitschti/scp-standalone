@@ -36,6 +36,7 @@ This project provides a standalone proxy server for streaming from the Stripchat
    - For default streams (if username provided at startup): Use `http://<host>:<port>/` or the logged proxy URL.
    - For dynamic streams: Use `http://<host>:<port>/<username>` to fetch and stream for that username.
    - The proxy supports multiple concurrent connections via threading.
+   - Use in your application or media player to access the stream that can handle HLS (HTTP Live Streaming).
 
 ## Features
 
