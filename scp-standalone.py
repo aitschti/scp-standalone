@@ -26,6 +26,12 @@ FORWARD_HEADERS = {
     'Accept': '*/*'
 }
 
+# API Endpoints
+API_ENDPOINT_MODEL = "https://stripchat.com/api/front/v2/models/username/{}/cam"
+
+# M3U8 URL Template
+M3U8_BASE_URL = "https://edge-hls.doppiocdn.com/hls/{}/master/{}.m3u8"
+
 # Tunables
 REQUEST_TIMEOUT = 5
 MAX_FETCH_RETRIES = 3
@@ -605,7 +611,7 @@ def fetch_stream_url(username):
         else:
             del _username_m3u8_cache[username]  # Expired, remove
     
-    api_url = f"https://stripchat.com/api/front/v2/models/username/{username}/cam"
+    api_url = API_ENDPOINT_MODEL.format(username)
     headers = {
         "Content-Type": "application/x-www-form-urlencoded",
         "X-Requested-With": "XMLHttpRequest",
@@ -624,7 +630,7 @@ def fetch_stream_url(username):
             logger.error(f"Stream offline or private (status: {user_data['status']})")
             return None
         stream_name = data["cam"]["streamName"]
-        m3u8_url = f"https://edge-hls.doppiocdn.com/hls/{stream_name}/master/{stream_name}.m3u8"
+        m3u8_url = M3U8_BASE_URL.format(stream_name, stream_name)
         #m3u8_url = f"https://edge-hls.doppiocdn.com/hls/{stream_name}/master/{stream_name}_auto.m3u8"
         # Cache the result
         _username_m3u8_cache[username] = (now, m3u8_url)
