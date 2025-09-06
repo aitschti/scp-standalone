@@ -44,24 +44,12 @@ _stream_m3u8_url = None
 _username_m3u8_cache = {}
 CACHE_TTL_SECONDS = 300  # 5 minutes
 
+# Global cache for decode key (read once at startup)
+_decode_key = None
+
 def _get_decode_key():
-    """Get the decode key from key.txt in the same directory as the script."""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    key_file = os.path.join(script_dir, 'key.txt')
-    try:
-        with open(key_file, 'r') as f:
-            key = f.read().strip()
-        if not key:
-            logger.error("Decode key is empty in key.txt. Playback will fail for encrypted streams.")
-            return None
-        logger.debug("Using decode key from key.txt")
-        return key
-    except FileNotFoundError:
-        logger.error("key.txt not found in the script directory. Please create it with the decode key.")
-        return None
-    except Exception as e:
-        logger.error(f"Failed to read decode key from key.txt: {e}")
-        return None
+    """Return the cached decode key (loaded at startup)."""
+    return _decode_key
 
 def _pad_b64(s: str) -> str:
     if not s:
@@ -145,19 +133,6 @@ def _extract_psch_and_pkey(m3u8_text):
 def _make_absolute(base, ref):
     return urllib.parse.urljoin(base, ref)
 
-def _force_web_playlist_url(url: str) -> str:
-    """If URL points to a .m3u8, set playlistType=web."""
-    try:
-        p = urllib.parse.urlsplit(url)
-        if p.path.lower().endswith('.m3u8'):
-            q = urllib.parse.parse_qs(p.query, keep_blank_values=True)
-            q['playlistType'] = ['web']  # override lowLatency
-            new_q = urllib.parse.urlencode({k: v[0] for k, v in q.items()})
-            return urllib.parse.urlunsplit((p.scheme, p.netloc, p.path, new_q, p.fragment))
-    except Exception:
-        pass
-    return url
-
 def _fetch_with_retries(url, headers=None, timeout=REQUEST_TIMEOUT, retries=MAX_FETCH_RETRIES):
     """Fetch URL with a few retries. Returns a response or raises last exception.
     If an HTTPError occurs it is returned (caller should inspect .code)."""
@@ -174,6 +149,8 @@ def _fetch_with_retries(url, headers=None, timeout=REQUEST_TIMEOUT, retries=MAX_
         except (urllib.error.URLError, socket.timeout) as e:
             last_exc = e
             time.sleep(0.2 * attempt)
+    if last_exc is None:
+        raise urllib.error.URLError("Failed to fetch after multiple attempts")
     raise last_exc
 
 def _normalize_strip_psch_pkey(url: str) -> str:
@@ -190,6 +167,10 @@ def _normalize_strip_psch_pkey(url: str) -> str:
 
 class _ProxyHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+
+    def log_message(self, format, *args):
+        # Suppress default logging by doing nothing
+        pass
 
     def do_HEAD(self):
         """Handle HEAD requests so clients can probe resources (avoid 501)."""
@@ -287,6 +268,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             orig = _stream_m3u8_url
         elif path.startswith('/') and len(path) > 1:
             username = path[1:]  # Extract username from /username
+            logger.info(f"New connection request for username: {username}")
             orig = fetch_stream_url(username)
             if not orig:
                 self.send_response(404)
@@ -298,6 +280,10 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 return
+            # Log the proxy URL for the master playlist
+            host, port = self.server.server_address # type: ignore
+            proxy_url = f"http://{host}:{port}/?url={urllib.parse.quote(orig)}"
+            logger.info(f"Proxy URL for {username}: {proxy_url}")            
         else:
             self.send_response(400)
             self.send_header('Content-Type', 'text/plain')
@@ -308,9 +294,6 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             return
-        
-        # Force non-LL for top-level playlist requests too
-        orig = _force_web_playlist_url(orig)
 
         # Early halt if key fault detected and this is a segment request
         global _key_fault_detected
@@ -427,7 +410,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
 
                 text = _decode_m3u8_mouflon_files(text)
                 psch, pkey = _extract_psch_and_pkey(text)
-                host, port = self.server.server_address
+                host, port = self.server.server_address # type: ignore
 
                 def _inject_and_proxy(abs_url: str) -> str:
                     # no longer force playlistType=web
@@ -482,7 +465,15 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 self.send_header('Cache-Control', 'no-cache')
                 self.send_header('Connection', 'close')
                 self.end_headers()
-                self.wfile.write(body)
+                try:
+                    self.wfile.write(body)
+                except (BrokenPipeError, ConnectionResetError) as e:
+                    logger.debug("Client disconnected during playlist response for %s: %s" % (orig, e))
+                except OSError as e:
+                    if hasattr(e, 'winerror') and e.winerror == 10053:
+                        logger.debug("Client disconnected during playlist response for %s: %s" % (orig, e))
+                    else:
+                        raise
                 return
             except Exception as e:
                 self.send_response(502)
@@ -523,6 +514,18 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                     first = False
                 self.wfile.write(chunk)
             return
+        except (BrokenPipeError, ConnectionResetError) as e:
+            # Client disconnected (common with Kodi/VLC); log at debug to reduce noise
+            logger.debug("Client disconnected during streaming for %s: %s" % (orig, e))
+            return
+        except OSError as e:
+            # Handle Windows-specific socket errors (10054: remote close, 10053: local abort)
+            if hasattr(e, 'winerror') and e.winerror in (10054, 10053):
+                logger.debug("Client disconnected during streaming for %s: %s" % (orig, e))
+                return
+            else:
+                # Re-raise other OSError (e.g., network issues)
+                raise
         except Exception as e:
             try:
                 self.send_response(502)
@@ -622,6 +625,7 @@ def fetch_stream_url(username):
             return None
         stream_name = data["cam"]["streamName"]
         m3u8_url = f"https://edge-hls.doppiocdn.com/hls/{stream_name}/master/{stream_name}.m3u8"
+        #m3u8_url = f"https://edge-hls.doppiocdn.com/hls/{stream_name}/master/{stream_name}_auto.m3u8"
         # Cache the result
         _username_m3u8_cache[username] = (now, m3u8_url)
         return m3u8_url
@@ -634,7 +638,14 @@ def main():
     parser.add_argument('username', nargs='?', help='Username of the streamer (optional; if not provided, proxy waits for /username requests)')
     parser.add_argument('--port', type=int, default=0, help='Port to run the proxy on (default: auto)')
     parser.add_argument('--host', type=str, default='127.0.0.1', help='Host to bind to (default: 127.0.0.1)')
+    parser.add_argument('--verbose', action='store_true', help='Enable verbose logging (includes debug messages from ProxyHandler)')
     args = parser.parse_args()
+
+    # Adjust logging level based on verbose flag
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+    else:
+        logging.getLogger().setLevel(logging.INFO)
 
     global _stream_m3u8_url
     if args.username:
@@ -645,6 +656,25 @@ def main():
             return
         _stream_m3u8_url = m3u8_url
         logger.info(f"Default stream set for username: {args.username}")
+
+    # Load decode key once at startup
+    global _decode_key
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    key_file = os.path.join(script_dir, 'key.txt')
+    try:
+        with open(key_file, 'r') as f:
+            _decode_key = f.read().strip()
+        if not _decode_key:
+            logger.error("Decode key is empty in key.txt. Playback will fail for encrypted streams.")
+            _decode_key = None
+        else:
+            logger.debug("Loaded decode key from key.txt")
+    except FileNotFoundError:
+        logger.error("key.txt not found in the script directory. Please create it with the decode key.")
+        _decode_key = None
+    except Exception as e:
+        logger.error(f"Failed to read decode key from key.txt: {e}")
+        _decode_key = None
 
     # Start the proxy
     proxy = HLSProxy(host=args.host, port=args.port)
