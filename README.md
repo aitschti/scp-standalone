@@ -20,7 +20,7 @@ This project provides a standalone proxy server for streaming from the Stripchat
      ```cmd
      python scp-standalone.py <username> [--port <port>] [--host <host>]
      ```
-     
+
      Replace `<username>` with the desired username to fetch streams. Optionally, specify a port with `--port` (default: auto-select) and host with `--host` (default: 127.0.0.1). The proxy will fetch the stream URL at startup and serve it as the default for requests to the root path (`/`).
 
    - **Without a Default Username**: Start the proxy without a username to enable dynamic requests:
@@ -35,8 +35,12 @@ This project provides a standalone proxy server for streaming from the Stripchat
    - Once the proxy is running, it will log the URL(s) for access.
    - For default streams (if username provided at startup): Use `http://<host>:<port>/` or the logged proxy URL.
    - For dynamic streams: Use `http://<host>:<port>/<username>` to fetch and stream for that username.
-   - The proxy supports multiple concurrent connections via threading.
-   - Use in your application or media player to access the stream that can handle HLS (HTTP Live Streaming).
+   - The proxy supports multiple concurrent connections.
+   - Use in your app of choice that can handle HLS (HTTP Live Streaming) to access the stream.
+
+5. **Verbosity**:
+   - By default, the proxy runs in a non-verbose mode, suppressing standard HTTP request logs, only showing essential information.
+   - To enable verbose logging, start the proxy with the `--verbose` flag.
 
 ## Features
 
@@ -47,6 +51,7 @@ This project provides a standalone proxy server for streaming from the Stripchat
 - Allows setting a default stream at startup for convenience.
 - Supports multiple concurrent connections for simultaneous users.
 - Caches fetched M3U8 URLs per username (with a 5-minute TTL) to reduce API calls.
+- "-h" option for help.
 
 ## License
 
