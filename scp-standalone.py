@@ -182,6 +182,19 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         # Suppress default logging by doing nothing
         pass
 
+    def handle(self):
+        """Override to catch Windows socket errors (10053/10054) during request handling."""
+        try:
+            super().handle()
+        except (ConnectionResetError, ConnectionAbortedError) as e:
+            # Handle Windows-specific socket errors for client disconnections
+            if hasattr(e, 'winerror') and e.winerror in (10054, 10053):
+                logger.debug(f"Client disconnected during request handling: {e}")
+            else:
+                logger.error(f"Unhandled socket error during request handling: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error in request handler: {e}")
+
     def do_HEAD(self):
         """Handle HEAD requests so clients can probe resources (avoid 501)."""
         path = self.path
