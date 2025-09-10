@@ -30,7 +30,11 @@ FORWARD_HEADERS = {
 API_ENDPOINT_MODEL = "https://stripchat.com/api/front/v2/models/username/{}/cam"
 
 # M3U8 URL Template
-M3U8_BASE_URL = "https://edge-hls.doppiocdn.com/hls/{}/master/{}.m3u8"
+M3U8_BASE_URL = "https://edge-hls.doppiocdn.com/hls/{}/master/{}_auto.m3u8"
+M3U8_BESTONLY_URL = "https://edge-hls.doppiocdn.com/hls/{}/master/{}.m3u8" # Will be used at a later stage
+
+# Global flag for using best quality playlist
+_use_best = False
 
 # Tunables
 REQUEST_TIMEOUT = 5
@@ -48,7 +52,7 @@ _stream_m3u8_url = None
 
 # Global cache for username -> M3U8 URL (with timestamp for TTL)
 _username_m3u8_cache = {}
-CACHE_TTL_SECONDS = 300  # 5 minutes
+CACHE_TTL_SECONDS = 30  # 30 seconds
 
 # Global cache for decode key (read once at startup)
 _decode_key = None
@@ -211,7 +215,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 for h, v in cached.get('headers', {}).items():
                     self.send_header(h, v)
                 self.send_header('Content-Length', str(len(cached['bytes'])))
-                self.send_header('Connection', 'close')
+                self.send_header('Connection', 'keep-alive')
                 self.end_headers()
             except Exception as e:
                 logger.error("Error serving cached HEAD for %s: %s" % (orig, e))
@@ -329,7 +333,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 for h, v in cached.get('headers', {}).items():
                     self.send_header(h, v)
                 self.send_header('Content-Length', str(len(cached['bytes'])))
-                self.send_header('Connection', 'close')
+                self.send_header('Connection', 'keep-alive')
                 self.end_headers()
                 self.wfile.write(cached['bytes'])
             except Exception as e:
@@ -370,7 +374,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 self.send_header('Content-Type', 'application/vnd.apple.mpegurl')
                 self.send_header('Content-Length', str(len(body)))
                 self.send_header('Cache-Control', 'no-cache')
-                self.send_header('Connection', 'close')
+                self.send_header('Connection', 'keep-alive')
                 self.end_headers()
                 self.wfile.write(body)
                 return
@@ -469,7 +473,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 self.send_header('Content-Type', 'application/vnd.apple.mpegurl')
                 self.send_header('Content-Length', str(len(body)))
                 self.send_header('Cache-Control', 'no-cache')
-                self.send_header('Connection', 'close')
+                self.send_header('Connection', 'keep-alive')
                 self.end_headers()
                 try:
                     self.wfile.write(body)
@@ -504,7 +508,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         ce = resp.headers.get('Content-Encoding')
         if ce:
             self.send_header('Content-Encoding', ce)
-        self.send_header('Connection', 'close')
+        self.send_header('Connection', 'keep-alive')
         self.end_headers()
 
         # Original streaming logic
@@ -602,6 +606,9 @@ def get_proxy(port=None):
 
 def fetch_stream_url(username):
     """Fetch the M3U8 URL for the given username."""
+    # Strip .m3u8 from username if present
+    if username.endswith('.m3u8'):
+        username = username[:-5]  # Strip .m3u8 from username
     # Check cache first
     now = time.time()
     if username in _username_m3u8_cache:
@@ -630,8 +637,9 @@ def fetch_stream_url(username):
             logger.error(f"Stream offline or private (status: {user_data['status']})")
             return None
         stream_name = data["cam"]["streamName"]
-        m3u8_url = M3U8_BASE_URL.format(stream_name, stream_name)
-        #m3u8_url = f"https://edge-hls.doppiocdn.com/hls/{stream_name}/master/{stream_name}_auto.m3u8"
+        # Choose URL template based on --best flag
+        url_template = M3U8_BESTONLY_URL if _use_best else M3U8_BASE_URL
+        m3u8_url = url_template.format(stream_name, stream_name)
         # Cache the result
         _username_m3u8_cache[username] = (now, m3u8_url)
         return m3u8_url
@@ -644,6 +652,7 @@ def main():
     parser.add_argument('username', nargs='?', help='Username of the streamer (optional; if not provided, proxy waits for /username requests)')
     parser.add_argument('--port', type=int, default=0, help='Port to run the proxy on (default: auto)')
     parser.add_argument('--host', type=str, default='127.0.0.1', help='Host to bind to (default: 127.0.0.1)')
+    parser.add_argument('--best', action='store_true', help='Use best quality only playlist instead of variants playlist')
     parser.add_argument('--verbose', action='store_true', help='Enable verbose logging (includes debug messages from ProxyHandler)')
     args = parser.parse_args()
 
@@ -652,6 +661,10 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
     else:
         logging.getLogger().setLevel(logging.INFO)
+
+    # Set global flag for best quality
+    global _use_best
+    _use_best = args.best
 
     global _stream_m3u8_url
     if args.username:
