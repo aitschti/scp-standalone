@@ -656,6 +656,7 @@ def main():
     parser.add_argument('username', nargs='?', help='Username of the streamer (optional; if not provided, proxy waits for /username requests)')
     parser.add_argument('--port', type=int, default=0, help='Port to run the proxy on (default: auto)')
     parser.add_argument('--host', type=str, default='127.0.0.1', help='Host to bind to (default: 127.0.0.1)')
+    parser.add_argument('--proxy', type=str, help='Proxy URL (e.g., socks4://ip:port or http://ip:port). Optional.')
     parser.add_argument('--best', action='store_true', help='Use best quality only playlist instead of variants playlist')
     parser.add_argument('--verbose', action='store_true', help='Enable verbose logging (includes debug messages from ProxyHandler)')
     args = parser.parse_args()
@@ -669,6 +670,15 @@ def main():
     # Set global flag for best quality
     global _use_best
     _use_best = args.best
+
+    # Configure proxy if provided
+    if args.proxy:
+        proxies = {
+            'http': args.proxy,
+            'https': args.proxy
+        }
+        _global_session.proxies.update(proxies)
+        logger.info(f"Using proxy: {args.proxy}")
 
     global _stream_m3u8_url
     if args.username:
