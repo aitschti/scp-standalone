@@ -1,3 +1,4 @@
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.parse
@@ -692,8 +693,13 @@ def main():
 
     # Load decode key once at startup
     global _decode_key
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    key_file = os.path.join(script_dir, 'key.txt')
+    if getattr(sys, 'frozen', False):
+        # Running as bundled executable
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        # Running as script
+        exe_dir = os.path.dirname(os.path.abspath(__file__))
+    key_file = os.path.join(exe_dir, 'key.txt')
     try:
         with open(key_file, 'r') as f:
             _decode_key = f.read().strip()
