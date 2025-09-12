@@ -31,6 +31,12 @@ This project provides a standalone proxy server for streaming from the Stripchat
 
      In this mode, the proxy waits for incoming requests in the format `http://<host>:<port>/<username>` to fetch and serve streams on-demand. Requests to the root path (`/`) will return an error if no default is set.
 
+   - **Serve Best Quality Only**: To force the proxy to use the best quality playlist instead of the variants playlist, add the `--best` flag:
+
+     ```cmd
+     python scp-standalone.py <username> --best
+     ```
+
 4. **Access the Stream**:
    - Once the proxy is running, it will log the URL(s) for access.
    - For default streams (if username provided at startup): Use `http://<host>:<port>/` or the logged proxy URL.
@@ -55,13 +61,13 @@ The proxy accepts the following command-line arguments:
 
 - `--host <host>` (optional, string, default: '127.0.0.1'): Specifies the host address for the proxy server to bind to. Defaults to localhost (127.0.0.1) for local access.
 
+- `--proxy <proxy_url>` (optional, string): Specifies a proxy URL to use for all HTTP/HTTPS requests (e.g., `socks4://ip:port` or `http://ip:port`). This is optional and allows routing traffic through a proxy server. Requires the `PySocks` library for SOCKS proxies.
+
 - `--best` (optional, flag): Forces the proxy to use the best quality playlist instead of the variants playlist. This serves a single high-quality stream directly, bypassing quality selection options. This may improve quality for some players (no switching).
 
 - `--verbose` (optional, flag): Enables verbose logging, which includes debug messages from the proxy handler in addition to standard info logs. Useful for troubleshooting.
 
-- `-h` or `--help`: Displays help information about all available arguments and exits.
-
-
+- `-h` or `--help`: Displays help information about all available arguments.
 
 ## Features
 
