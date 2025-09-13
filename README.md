@@ -1,20 +1,18 @@
 # Stripchat Standalone Proxy
 
-This project provides a standalone proxy server for streaming from the Stripchat platform. The proxy allows users to fetch streams by specifying a username from the command line or dynamically via HTTP requests. It automatically selects an available port if none is specified and logs the URL to be used for streaming.
+This project provides a standalone proxy server for streaming from the Stripchat platform. The proxy allows users to fetch streams by specifying a username from the command line or dynamically via HTTP requests. It automatically selects an available port if none is specified and logs the URL to be used for streaming. It also handles the decoding of the newly added scrambling of playlist file urls by Stripchat.
 
 ## Files
 
-- **scp-standalone.py**: The main implementation of the standalone proxy server. This file contains the logic to start the proxy, handle streaming requests, and manage the decryption of playlist names using a key stored in `key.txt`.
+- **scp-standalone.py**: The main implementation of the standalone proxy server. This file contains the logic to start the proxy, handle streaming requests, and manage the decryption of playlist file urls by fetching a new one if decoding fails or the `key.txt` file is missing.
 
-- **key.txt**: A text file that stores the decryption key required for processing encrypted playlist file urls. The proxy reads this file to obtain the necessary key for decrypting playlist data. I CANNOT PROVIDE THE KEY!
+- **key.txt**: A text file that stores the key required for processing encrypted playlist file urls. Gets created/updated on first request if missing or key is invalid.
 
 ## Quick Start / Usage
 
 1. **Install Dependencies**: Ensure you have Python installed along with any required libraries. You may need to install additional packages depending on your environment.
 
-2. **Set Up the Key**: Open `key.txt` file in the project directory and add your decryption key. This key is essential for the proxy to function correctly with encrypted playlist files.
-
-3. **Run the Proxy**:
+2. **Run the Proxy**:
    - **With a Default Username**: Open a terminal and navigate to the project directory. Start the proxy with a username to set a default stream:
   
      ```cmd
@@ -31,7 +29,7 @@ This project provides a standalone proxy server for streaming from the Stripchat
 
      In this mode, the proxy waits for incoming requests in the format `http://<host>:<port>/<username>` to fetch and serve streams on-demand. Requests to the root path (`/`) will return an error if no default is set.
 
-   - **Serve Best Quality Only**: To force the proxy to use the best quality playlist instead of the variants playlist, add the `--best` flag:
+   - **Serve best quality only**: To force the proxy to use the best quality playlist instead of the variants playlist, add the `--best` flag:
 
      ```cmd
      python scp-standalone.py <username> --best
@@ -73,10 +71,12 @@ The proxy accepts the following command-line arguments:
 
 - Automatically selects an available port if none is specified.
 - Logs the streaming URL(s) for easy access.
-- Reads from `key.txt` for decryption of playlist names.
-- Supports dynamic username requests via `http://<host>:<port>/<username>` for on-demand streaming.
+- Handles decoding of newly added scrambling of playlist file urls by Stripchat.
+- Supports both default and dynamic (via `http://<host>:<port>/<username>`) username requests.
 - Allows setting a default stream at startup for convenience.
 - Supports multiple concurrent connections for simultaneous users.
+- Mimics browser-like behavior with appropriate headers.
+- Optionally uses a proxy server for all requests.
 
 ## License
 
