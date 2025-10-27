@@ -257,16 +257,23 @@ def _decode_m3u8_mouflon_files(m3u8_text: str, username=None) -> str:
     return "\n".join(lines)
 
 def _extract_psch_and_pkey(m3u8_text):
-    """Return (psch_version, pkey) from #EXT-X-MOUFLON:PSCH line if present."""
+    """Return (psch_version, pkey) from the last #EXT-X-MOUFLON:PSCH line if present (ignores earlier ones)."""
+    psch_lines = []
     for line in m3u8_text.splitlines():
         l = line.strip()
         if not l:
             continue
         if l.upper().startswith('#EXT-X-MOUFLON:PSCH'):
-            parts = l.split(':', 3)
-            version = parts[2].lower() if len(parts) > 2 else ''
-            pkey = parts[3] if len(parts) > 3 else ''
-            return version, pkey
+            psch_lines.append(l)
+    if psch_lines:
+        # Use the last (second) PSCH line if multiple are found
+        last_line = psch_lines[-1]
+        parts = last_line.split(':', 3)
+        version = parts[2].lower() if len(parts) > 2 else ''
+        pkey = parts[3] if len(parts) > 3 else ''
+        return version, pkey
+        
+    logger.warning("No PSCH lines found in m3u8")
     return '', ''
 
 def _make_absolute(base, ref):
