@@ -1,5 +1,7 @@
 # Stripchat Standalone Proxy
 
+**DEC '25 UPDATE: AUTOMATIC KEY FETCHING IS BROKEN ATM, NOTHING I CAN DO. OLD KEY REMAINS VALID FOR NOW. RETRY CONNECTION IF IT FAILS, THEY SWITCH AROUND OTHER KEYS**
+
 This project provides a standalone proxy server for streaming from the Stripchat platform. The proxy allows users to fetch streams by specifying a username from the command line or dynamically via HTTP requests. It automatically selects an available port if none is specified and logs the URL to be used for streaming. It also handles the decoding of the newly added scrambling of playlist file urls by Stripchat.
 
 ## Files
