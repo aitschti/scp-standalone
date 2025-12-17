@@ -39,7 +39,6 @@ FORWARD_HEADERS = {
 
 # API Endpoints
 API_ENDPOINT_MODEL = "https://stripchat.com/api/front/v2/models/username/{}/cam"
-API_CONFIG_URL = "https://stripchat.com/api/front/v3/config/static"
 
 # M3U8 URL Template
 M3U8_BASE_URL = "https://edge-hls.doppiocdn.com/hls/{}/master/{}_auto.m3u8"
@@ -99,103 +98,15 @@ def _is_valid_decrypted_url(url: str) -> bool:
     pattern = r'^https://.*\.mp4$'
     return bool(re.match(pattern, url))
 
-def _getkey_from_site(pkey):
-    """Fetch the decode key using the pkey from m3u8 data."""
-    logger.info("Start fetching new decode key...")
-    
-    try:
-        # Get config json from API
-        resp = _global_session.get(API_CONFIG_URL, headers=FORWARD_HEADERS, timeout=REQUEST_TIMEOUT)
-        resp.raise_for_status()
-        config_data = resp.json()['static']
-        
-        origin = config_data['features']['MMPExternalSourceOrigin']
-        version = config_data['featuresV2']['playerModuleExternalLoading']['mmpVersion']
-        
-        if not origin or not version:
-            logger.warning("Failed to extract URLs from config API.")
-            return
-
-        # Fetch main.js
-        main_js_url = f"{origin}/v{version}/main.js"
-        resp = _global_session.get(main_js_url, headers=FORWARD_HEADERS, timeout=REQUEST_TIMEOUT)
-        resp.raise_for_status()
-        main_js_text = resp.text
-        
-        # Extract Doppio JS name
-        match = re.search(r'require\("./(Doppio[^"]*\.js)"\)', main_js_text)
-        if not match:
-            logger.error("Doppio JS name not found in main.js")
-            return
-        doppio_name = match.group(1)
-        
-        # Fetch Doppio JS
-        doppio_url = f"{origin}/v{version}/{doppio_name}"
-        resp = _global_session.get(doppio_url, headers=FORWARD_HEADERS, timeout=REQUEST_TIMEOUT)
-        resp.raise_for_status()
-        doppio_js_text = resp.text
-        
-        # Extract decode key
-        match = re.search(rf'{re.escape(pkey)}:([^"]+)', doppio_js_text)
-        if not match:
-            logger.error(f"pkey {pkey} not found in Doppio JS")
-            return
-        decode_key = match.group(1)
-        logger.info(f"Found the following decode key: {decode_key}")
-        
-        # Set global decode key
-        global _decode_key
-        _decode_key = decode_key
-        
-        # Save to key.txt
-        exe_dir = os.path.dirname(os.path.abspath(__file__)) if not getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(sys.executable))
-        key_file = os.path.join(exe_dir, 'key.txt')
-        with open(key_file, 'w') as f:
-            f.write(decode_key)
-        logger.info("Saved decode key to key.txt")
-        
-    except KeyError as e:
-        logger.warning(f"Failed to extract required fields from config API: {e}")
-    except Exception as e:
-        logger.error(f"Failed to fetch or process data for key fetch: {e}")
-
-def _decode_m3u8_mouflon_files(m3u8_text: str, username=None) -> str:
+def _decode_m3u8_mouflon_files(m3u8_text: str) -> str:
     """Find '#EXT-X-MOUFLON:FILE:<b64>' lines and replace the next media reference 'media.mp4' with decoded filename."""
     if "#EXT-X-MOUFLON" not in m3u8_text:
         return m3u8_text
     lines = m3u8_text.splitlines()
     key = _get_decode_key()
     if key is None:
-        logger.info("Decode key missing. Fetching new key.")
-        psch, pkey = _extract_psch_and_pkey(m3u8_text)
-        _getkey_from_site(pkey)
-        # Check if key is now available and re-decode
-        key = _get_decode_key()
-        if key:
-            logger.info("New key fetched. Re-decoding playlist.")
-            invalid_decryptions = 0
-            for idx, line in enumerate(lines):
-                if line.startswith("#EXT-X-MOUFLON:FILE:"):
-                    enc = line.split(":", 2)[-1].strip()
-                    dec = _mouflon_decrypt_b64(enc, key)
-                    # Find next non-empty line after the tag and replace 'media.mp4' if present
-                    for j in range(idx + 1, min(len(lines), idx + 6)):
-                        candidate = lines[j]
-                        if candidate.strip() == "":
-                            continue
-                        if "media.mp4" in candidate:
-                            new_candidate = candidate.replace("media.mp4", dec)
-                            # Validate the full constructed URL
-                            if not _is_valid_decrypted_url(new_candidate):
-                                logger.warning("Invalid decrypted URL. Decode key may be wrong.")
-                                invalid_decryptions += 1
-                                continue  # Skip replacing this one
-                            if new_candidate != candidate:
-                                lines[j] = new_candidate
-                            break
-            if invalid_decryptions == 0:
-                return "\n".join(lines)
-        return m3u8_text  # Return original if no key or still invalid
+        logger.error("Skipping decryption due to missing decode key. Encrypted streams will not play.")
+        return m3u8_text  # Return original without decoding
     
     invalid_decryptions = 0
     for idx, line in enumerate(lines):
@@ -211,7 +122,7 @@ def _decode_m3u8_mouflon_files(m3u8_text: str, username=None) -> str:
                     new_candidate = candidate.replace("media.mp4", dec)
                     # Validate the full constructed URL
                     if not _is_valid_decrypted_url(new_candidate):
-                        logger.warning("Invalid decrypted URL. Decode key may be wrong.")
+                        logger.error(f"Invalid decrypted URL: {new_candidate}. Decode key may be wrong or outdated.")
                         invalid_decryptions += 1
                         continue  # Skip replacing this one
                     if new_candidate != candidate:
@@ -219,36 +130,7 @@ def _decode_m3u8_mouflon_files(m3u8_text: str, username=None) -> str:
                     break
     
     if invalid_decryptions > 0:
-        logger.warning(f"Decryption failed for {invalid_decryptions} segments. Decode key may be wrong. Fetching new key.")
-        psch, pkey = _extract_psch_and_pkey(m3u8_text)
-        _getkey_from_site(pkey)
-        # Check if key is now available and re-decode
-        key = _get_decode_key()
-        if key:
-            logger.info("New key fetched. Re-decoding playlist.")
-            lines = m3u8_text.splitlines()  # Reset lines
-            invalid_decryptions = 0
-            for idx, line in enumerate(lines):
-                if line.startswith("#EXT-X-MOUFLON:FILE:"):
-                    enc = line.split(":", 2)[-1].strip()
-                    dec = _mouflon_decrypt_b64(enc, key)
-                    # Find next non-empty line after the tag and replace 'media.mp4' if present
-                    for j in range(idx + 1, min(len(lines), idx + 6)):
-                        candidate = lines[j]
-                        if candidate.strip() == "":
-                            continue
-                        if "media.mp4" in candidate:
-                            new_candidate = candidate.replace("media.mp4", dec)
-                            # Validate the full constructed URL
-                            if not _is_valid_decrypted_url(new_candidate):
-                                logger.warning("Invalid decrypted URL. Decode key may be wrong.")
-                                invalid_decryptions += 1
-                                continue  # Skip replacing this one
-                            if new_candidate != candidate:
-                                lines[j] = new_candidate
-                            break
-            if invalid_decryptions == 0:
-                return "\n".join(lines)
+        logger.error(f"Decryption failed for {invalid_decryptions} segments. Check decode key in key.txt.")
         # If all decryptions fail, return original to avoid broken stream
         if invalid_decryptions == len([l for l in lines if l.startswith("#EXT-X-MOUFLON:FILE:")]):
             logger.error("All decryptions invalid. Returning original m3u8.")
@@ -257,7 +139,7 @@ def _decode_m3u8_mouflon_files(m3u8_text: str, username=None) -> str:
     return "\n".join(lines)
 
 def _extract_psch_and_pkey(m3u8_text):
-    """Return (psch_version, pkey) from the last #EXT-X-MOUFLON:PSCH line if present (ignores earlier ones)."""
+    """Return (psch_version, pkey) from #EXT-X-MOUFLON:PSCH line if present."""
     psch_lines = []
     for line in m3u8_text.splitlines():
         l = line.strip()
@@ -265,16 +147,22 @@ def _extract_psch_and_pkey(m3u8_text):
             continue
         if l.upper().startswith('#EXT-X-MOUFLON:PSCH'):
             psch_lines.append(l)
-    if psch_lines:
-        # Use the last (second) PSCH line if multiple are found
-        last_line = psch_lines[-1]
-        parts = last_line.split(':', 3)
-        version = parts[2].lower() if len(parts) > 2 else ''
-        pkey = parts[3] if len(parts) > 3 else ''
-        return version, pkey
-        
-    logger.warning("No PSCH lines found in m3u8")
-    return '', ''
+
+    if not psch_lines:
+        return '', ''
+
+    # Prefer the last 'v1' PSCH line if present
+    v1_lines = []
+    for l in psch_lines:
+        parts_tmp = l.split(':', 3)
+        if len(parts_tmp) > 2 and parts_tmp[2].lower().startswith('v1'):
+            v1_lines.append(l)
+
+    selected_line = v1_lines[-1] if v1_lines else psch_lines[-1]
+    parts = selected_line.split(':', 3)
+    version = parts[2].lower() if len(parts) > 2 else ''
+    pkey = parts[3] if len(parts) > 3 else ''
+    return version, pkey
 
 def _make_absolute(base, ref):
     return urllib.parse.urljoin(base, ref)
@@ -549,7 +437,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         if is_playlist:
             try:
                 text = resp.text  # requests handles decompression
-                text = _decode_m3u8_mouflon_files(text, username=username if 'username' in locals() else None) # type: ignore
+                text = _decode_m3u8_mouflon_files(text)
                 psch, pkey = _extract_psch_and_pkey(text)
                 host, port = self.server.server_address # type: ignore
 
@@ -834,8 +722,7 @@ def main():
         else:
             logger.debug("Loaded decode key from key.txt")
     except FileNotFoundError:
-        logger.error("key.txt not found in the script directory.")
-        logger.error("Will try to fetch key from site on first request or restart with a key.txt present.")
+        logger.error("key.txt not found in the script directory. Please create it with the decode key.")
         _decode_key = None
     except Exception as e:
         logger.error(f"Failed to read decode key from key.txt: {e}")
