@@ -1,40 +1,50 @@
 # Stripchat Standalone Proxy
 
-**DEC '25 UPDATE: AUTOMATIC KEY FETCHING IS BROKEN ATM, NOTHING I CAN DO. OLD KEY REMAINS VALID FOR NOW. RETRY CONNECTION IF IT FAILS, THEY SWITCH AROUND OTHER KEYS**
+**DEC '25 UPDATE: Two versions available now. V2 (recommended) is more flexible with key selection.**
 
 This project provides a standalone proxy server for streaming from the Stripchat platform. The proxy allows users to fetch streams by specifying a username from the command line or dynamically via HTTP requests. It automatically selects an available port if none is specified and logs the URL to be used for streaming. It also handles the decoding of the newly added scrambling of playlist file urls by Stripchat.
 
+## Versions
+
+- **scp-standalone-v2.py** (RECOMMENDED): The new v2-only implementation with intelligent PSCH line selection. Uses `keys.txt` with format `pkey:pdkey` to automatically match the correct v2 encryption line from master playlists, no matter which position the key has in the plalist. This version is more flexible as Stripchat rotates between multiple v2 keys, and the proxy automatically selects the matching one.
+
+- **scp-standalone.py** (LEGACY): The original implementation. This version will be replaced by v2 in the future. Uses `key.txt` for single key storage and is set to use last available pkey.
+
 ## Files
 
-- **scp-standalone.py**: The main implementation of the standalone proxy server. This file contains the logic to start the proxy, handle streaming requests, and manage the decryption of playlist file urls by fetching a new one if decoding fails or the `key.txt` file is missing.
+- **scp-standalone-v2.py**: The recommended v2 proxy implementation. Handles v2 playlist decryption with key matching. Uses `keys.txt` for key storage in `pkey:pdkey` format.
 
-- **key.txt**: A text file that stores the key required for processing encrypted playlist file urls. Gets created/updated on first request if missing or key is invalid.
+- **scp-standalone.py**: The legacy proxy implementation. Uses `key.txt` for single key storage.
+
+- **keys.txt**: Required for v2 version. Stores keys in format `pkey:pdkey` (e.g., `Zeec...:ubah...`). The pkey determines which v2 PSCH line to use, pdkey decrypts the segments.
+
+- **key.txt**: Used by legacy version only. Stores single decryption key.
 
 ## Quick Start / Usage
 
-1. **Install Dependencies**: Ensure you have Python installed along with any required libraries. You may need to install additional packages depending on your environment.
+### For V2 Version (Recommended)
 
-2. **Run the Proxy**:
-   - **With a Default Username**: Open a terminal and navigate to the project directory. Start the proxy with a username to set a default stream:
+1. **Create keys.txt**: Create a `keys.txt` file in the same directory as the script with format `pkey:pdkey` (e.g., `Zeec...:ubah...`).
+
+2. **Install Dependencies**: Ensure you have Python installed along with the `requests` library.
+
+3. **Run the Proxy**:
+   - **With a Default Username**: Start the proxy with a username to set a default stream:
   
      ```cmd
-     python scp-standalone.py <username> [--port <port>] [--host <host>]
+     python scp-standalone-v2.py <username> [--port <port>] [--host <host>]
      ```
-
-     Replace `<username>` with the desired username to fetch streams. Optionally, specify a port with `--port` (default: auto-select) and host with `--host` (default: 127.0.0.1). The proxy will fetch the stream URL at startup and serve it as the default for requests to the root path (`/`).
 
    - **Without a Default Username**: Start the proxy without a username to enable dynamic requests:
 
      ```cmd
-     python scp-standalone.py [--port <port>] [--host <host>]
+     python scp-standalone-v2.py [--port <port>] [--host <host>]
      ```
 
-     In this mode, the proxy waits for incoming requests in the format `http://<host>:<port>/<username>` to fetch and serve streams on-demand. Requests to the root path (`/`) will return an error if no default is set.
-
-   - **Serve best quality only**: To force the proxy to use the best quality playlist instead of the variants playlist, add the `--best` flag:
+   - **Serve best quality only**: Add the `--best` flag:
 
      ```cmd
-     python scp-standalone.py <username> --best
+     python scp-standalone-v2.py <username> --best
      ```
 
 4. **Access the Stream**:
@@ -50,6 +60,10 @@ This project provides a standalone proxy server for streaming from the Stripchat
 6. **Verbosity**:
    - By default, the proxy runs in a non-verbose mode, suppressing standard HTTP request logs, only showing essential information.
    - To enable verbose logging, start the proxy with the `--verbose` flag.
+
+### For Legacy Version (scp-standalone.py)
+
+Use the same commands as above but replace `scp-standalone-v2.py` with `scp-standalone.py`. The legacy version uses `key.txt` instead of `keys.txt`.
 
 ## All Command Arguments
 
@@ -73,7 +87,7 @@ The proxy accepts the following command-line arguments:
 
 - Automatically selects an available port if none is specified.
 - Logs the streaming URL(s) for easy access.
-- Handles decoding of newly added scrambling of playlist file urls by Stripchat.
+- Handles decoding of scrambled playlist file urls by Stripchat.
 - Supports both default and dynamic (via `http://<host>:<port>/<username>`) username requests.
 - Allows setting a default stream at startup for convenience.
 - Supports multiple concurrent connections for simultaneous users.

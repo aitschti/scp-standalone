@@ -65,12 +65,17 @@ _stream_m3u8_url = None
 _username_m3u8_cache = {}
 CACHE_TTL_SECONDS = 30  # 30 seconds
 
-# Global cache for decode key (read once at startup)
-_decode_key = None
+# Global cache for pkey and pdkey (read once at startup from keys.txt)
+_pkey = None
+_pdkey = None
 
-def _get_decode_key():
-    """Return the cached decode key (loaded at startup)."""
-    return _decode_key
+def _get_pkey():
+    """Return the cached pkey (loaded at startup)."""
+    return _pkey
+
+def _get_pdkey():
+    """Return the cached pdkey (loaded at startup)."""
+    return _pdkey
 
 def _pad_b64(s: str) -> str:
     if not s:
@@ -103,9 +108,9 @@ def _decode_m3u8_mouflon_files(m3u8_text: str) -> str:
     if "#EXT-X-MOUFLON" not in m3u8_text:
         return m3u8_text
     lines = m3u8_text.splitlines()
-    key = _get_decode_key()
-    if key is None:
-        logger.error("Skipping decryption due to missing decode key. Encrypted streams will not play.")
+    pdkey = _get_pdkey()
+    if pdkey is None:
+        logger.error("Skipping decryption due to missing pdkey. Encrypted streams will not play.")
         return m3u8_text  # Return original without decoding
     
     invalid_decryptions = 0
@@ -119,7 +124,7 @@ def _decode_m3u8_mouflon_files(m3u8_text: str) -> str:
                 encrypted_segment = match.group(2)
                 # Reverse the segment, then apply decryption
                 reversed_segment = encrypted_segment[::-1]
-                dec = _mouflon_decrypt_b64(reversed_segment, key)
+                dec = _mouflon_decrypt_b64(reversed_segment, pdkey)
                 if dec:
                     # Replace encrypted segment in URI with decrypted value
                     new_uri = uri.replace(f'_{encrypted_segment}_', f'_{dec}_')
@@ -136,7 +141,7 @@ def _decode_m3u8_mouflon_files(m3u8_text: str) -> str:
                     invalid_decryptions += 1
     
     if invalid_decryptions > 0:
-        logger.error(f"Decryption failed for {invalid_decryptions} segments. Check decode key in key.txt.")
+        logger.error(f"Decryption failed for {invalid_decryptions} segments. Check pdkey in keys.txt.")
         # If all decryptions fail, return original to avoid broken stream
         mouflon_count = len([l for l in lines if l.startswith("#EXT-X-MOUFLON:")])
         if mouflon_count > 0 and invalid_decryptions == mouflon_count:
@@ -146,7 +151,7 @@ def _decode_m3u8_mouflon_files(m3u8_text: str) -> str:
     return "\n".join(lines)
 
 def _extract_psch_and_pkey(m3u8_text):
-    """Return (psch_version, pkey) from #EXT-X-MOUFLON:PSCH line if present."""
+    """Return (psch_version, pkey) from #EXT-X-MOUFLON:PSCH line, preferring the one matching loaded pkey."""
     psch_lines = []
     for line in m3u8_text.splitlines():
         l = line.strip()
@@ -158,14 +163,28 @@ def _extract_psch_and_pkey(m3u8_text):
     if not psch_lines:
         return '', ''
 
-    # Prefer the last 'v2' PSCH line if present
+    # Get loaded pkey to match against
+    loaded_pkey = _get_pkey()
+    
+    # Collect all v2 PSCH lines
     v2_lines = []
     for l in psch_lines:
         parts_tmp = l.split(':', 3)
         if len(parts_tmp) > 2 and parts_tmp[2].lower().startswith('v2'):
             v2_lines.append(l)
 
-    # Use the last v2 line if available, otherwise the last PSCH line
+    # If we have a loaded pkey, try to find matching v2 line
+    if loaded_pkey and v2_lines:
+        for l in v2_lines:
+            parts = l.split(':', 3)
+            if len(parts) > 3 and parts[3] == loaded_pkey:
+                version = parts[2].lower() if len(parts) > 2 else ''
+                pkey = parts[3]
+                logger.debug(f"Selected v2 PSCH line matching loaded pkey: {pkey}")
+                return version, pkey
+        logger.warning(f"Loaded pkey '{loaded_pkey}' not found in playlist. Using last v2 line.")
+    
+    # Fallback: use last v2 line if available, otherwise last PSCH line
     if v2_lines:
         selected_line = v2_lines[-1]
     else:
@@ -354,7 +373,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             self.send_header('Connection', 'close')
             self.end_headers()
             try:
-                self.wfile.write(b'Decode key error: Playback halted due to invalid key. Check key.txt.')
+                self.wfile.write(b'Decode key error: Playback halted due to invalid key. Check keys.txt.')
             except Exception:
                 pass
             return
@@ -403,11 +422,11 @@ class _ProxyHandler(BaseHTTPRequestHandler):
 
         # Check for 418 error (indicates invalid segment URL, likely due to wrong key)
         if resp.status_code == 418:
-            logger.error(f"Upstream returned 418 (invalid segment URL) for {orig}. Decode key may be wrong or outdated.")
+            logger.error(f"Upstream returned 418 (invalid segment URL) for {orig}. Pdkey may be wrong or outdated.")
             _key_fault_detected = True  # Set flag to halt further segment requests
             # For playlists, return custom m3u8 to minimize error dialog
             if is_playlist:
-                custom_playlist = "#EXTM3U\n#EXT-X-VERSION:3\n# Decode key error: Check key.txt for the correct key.\n"
+                custom_playlist = "#EXTM3U\n#EXT-X-VERSION:3\n# Decode key error: Check keys.txt for the correct pkey:pdkey.\n"
                 body = custom_playlist.encode('utf-8')
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/vnd.apple.mpegurl')
@@ -423,7 +442,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             self.send_header('Connection', 'close')
             self.end_headers()
             try:
-                self.wfile.write(b'Decode key error: Invalid segment URL. Check key.txt for the correct key.')
+                self.wfile.write(b'Decode key error: Invalid segment URL. Check keys.txt for the correct pkey:pdkey.')
             except Exception:
                 pass
             return
@@ -714,29 +733,45 @@ def main():
         _stream_m3u8_url = m3u8_url
         logger.info(f"Default stream set for username: {args.username}")
 
-    # Load decode key once at startup
-    global _decode_key
+    # Load pkey and pdkey once at startup from keys.txt (format: pkey:pdkey)
+    global _pkey, _pdkey
     if getattr(sys, 'frozen', False):
         # Running as bundled executable
         exe_dir = os.path.dirname(os.path.abspath(sys.executable))
     else:
         # Running as script
         exe_dir = os.path.dirname(os.path.abspath(__file__))
-    key_file = os.path.join(exe_dir, 'key.txt')
+    keys_file = os.path.join(exe_dir, 'keys.txt')
     try:
-        with open(key_file, 'r') as f:
-            _decode_key = f.read().strip()
-        if not _decode_key:
-            logger.error("Decode key is empty in key.txt. Playback will fail for encrypted streams.")
-            _decode_key = None
+        with open(keys_file, 'r') as f:
+            keys_content = f.read().strip()
+        if not keys_content:
+            logger.error("keys.txt is empty. Playback will fail for encrypted streams.")
+            _pkey = None
+            _pdkey = None
+        elif ':' not in keys_content:
+            logger.error("Invalid format in keys.txt. Expected format: pkey:pdkey")
+            _pkey = None
+            _pdkey = None
         else:
-            logger.debug("Loaded decode key from key.txt")
+            parts = keys_content.split(':', 1)
+            _pkey = parts[0].strip()
+            _pdkey = parts[1].strip()
+            if not _pkey or not _pdkey:
+                logger.error("Empty pkey or pdkey in keys.txt. Playback will fail for encrypted streams.")
+                _pkey = None
+                _pdkey = None
+            else:
+                logger.info(f"Loaded pkey: {_pkey}")
+                logger.debug(f"Loaded pdkey from keys.txt")
     except FileNotFoundError:
-        logger.error("key.txt not found in the script directory. Please create it with the decode key.")
-        _decode_key = None
+        logger.error("keys.txt not found in the script directory. Please create it with format: pkey:pdkey")
+        _pkey = None
+        _pdkey = None
     except Exception as e:
-        logger.error(f"Failed to read decode key from key.txt: {e}")
-        _decode_key = None
+        logger.error(f"Failed to read keys from keys.txt: {e}")
+        _pkey = None
+        _pdkey = None
 
     # Start the proxy
     proxy = HLSProxy(host=args.host, port=args.port)
