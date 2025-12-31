@@ -6,7 +6,7 @@ This project provides a standalone proxy server for streaming from the Stripchat
 
 ## Versions
 
-- **scp-standalone-v2.py** (RECOMMENDED): The new v2-only implementation with intelligent PSCH line selection. Uses `keys.txt` with format `pkey:pdkey` to automatically match the correct v2 encryption line from master playlists, no matter which position the key has in the plalist. This version is more flexible as Stripchat rotates between multiple v2 keys, and the proxy automatically selects the matching one.
+- **scp-standalone-v2.py** (RECOMMENDED): The new v2-only implementation with robust PSCH line selection. Uses `keys.txt` with format `pkey:pdkey` to automatically match the correct v2 encryption line from master playlists, no matter which position the key has in the playlist. This version is more flexible as Stripchat may possibly rotate between multiple v2 keys, and the proxy automatically selects the matching one.
 
 - **scp-standalone.py** (LEGACY): The original implementation. This version will be replaced by v2 in the future. Uses `key.txt` for single key storage and is set to use last available pkey.
 
