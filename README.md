@@ -1,30 +1,16 @@
 # Stripchat Standalone Proxy
 
-**DEC '25 UPDATE: Two versions available now. V2 (recommended) is more flexible with key selection.**
-
 This project provides a standalone proxy server for streaming from the Stripchat platform. The proxy allows users to fetch streams by specifying a username from the command line or dynamically via HTTP requests. It automatically selects an available port if none is specified and logs the URL to be used for streaming. It also handles the decoding of the newly added scrambling of playlist file urls by Stripchat.
-
-## Versions
-
-- **scp-standalone-v2.py** (RECOMMENDED): The new v2-only implementation with robust PSCH line selection. Uses `keys.txt` with format `pkey:pdkey` to automatically match the correct v2 encryption line from master playlists, no matter which position the key has in the playlist. This version is more flexible as Stripchat may possibly rotate between multiple v2 keys, and the proxy automatically selects the matching one.
-
-- **scp-standalone.py** (LEGACY): The original implementation. This version will be replaced by v2 in the future. Uses `key.txt` for single key storage and is set to use last available pkey.
 
 ## Files
 
-- **scp-standalone-v2.py**: The recommended v2 proxy implementation. Handles v2 playlist decryption with key matching. Uses `keys.txt` for key storage in `pkey:pdkey` format.
+- **scp-standalone-v2.py**: The sc v2 proxy implementation. Handles v2 playlist decryption with key matching. Uses `keys.txt` for key storage in `pkey:pdkey` format.
 
-- **scp-standalone.py**: The legacy proxy implementation. Uses `key.txt` for single key storage.
-
-- **keys.txt**: Required for v2 version. Stores keys in format `pkey:pdkey` (e.g., `Zeec...:ubah...`). The pkey determines which v2 PSCH line to use, pdkey decrypts the segments.
-
-- **key.txt**: Used by legacy version only. Stores single decryption key.
+- **keys.txt**: This file is essential. Stores keys in format `pkey:pdkey` (e.g., `Zeec...:ubah...`). The pkey determines which v2 PSCH line to use, pdkey decrypts the segments. Do not ask for keys.
 
 ## Quick Start / Usage
 
-### For V2 Version (Recommended)
-
-1. **Create keys.txt**: Create a `keys.txt` file in the same directory as the script with format `pkey:pdkey` (e.g., `Zeec...:ubah...`).
+1. **Create keys.txt**: Create a `keys.txt` file in the same directory as the script with format `pkey:pdkey` (e.g., `Zeec...:ubah...`). Do not ask for active keys.
 
 2. **Install Dependencies**: Ensure you have Python installed along with the `requests` library.
 
@@ -60,10 +46,6 @@ This project provides a standalone proxy server for streaming from the Stripchat
 6. **Verbosity**:
    - By default, the proxy runs in a non-verbose mode, suppressing standard HTTP request logs, only showing essential information.
    - To enable verbose logging, start the proxy with the `--verbose` flag.
-
-### For Legacy Version (scp-standalone.py)
-
-Use the same commands as above but replace `scp-standalone-v2.py` with `scp-standalone.py`. The legacy version uses `key.txt` instead of `keys.txt`.
 
 ## All Command Arguments
 
