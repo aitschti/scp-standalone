@@ -98,10 +98,23 @@ def _mouflon_decrypt_b64(encrypted_b64: str, key: str) -> str:
     except Exception:
         return out.decode("latin-1", errors="ignore")
 
-def _is_valid_decrypted_url(url: str) -> bool:
-    """Validate if the decrypted URL looks correct (e.g., ends with .mp4 and has part number)."""
-    pattern = r'^https://.*\.mp4$'
-    return bool(re.match(pattern, url))
+def clean_m3u8_text(playlist: str) -> str:
+    """Remove lines that start with any prefix in `remove_prefixes`.
+    Preserves other lines and their original newline characters.
+    """
+    # List of prefixes to remove
+    # Comparison is case-insensitive.
+    remove_prefixes = ["#EXT-X-MOUFLON"]
+
+    # Keep original line endings using splitlines(keepends=True)
+    lines = playlist.splitlines(keepends=True)
+    cleaned_lines = []
+    for ln in lines:
+        stripped = ln.lstrip()
+        if any(stripped.lower().startswith(p.lower()) for p in remove_prefixes):
+            continue
+        cleaned_lines.append(ln)
+    return "".join(cleaned_lines)
 
 def _decode_m3u8_mouflon_files(m3u8_text: str) -> str:
     """Find '#EXT-X-MOUFLON:URI:<url>' (v2) lines and decode by reversing and decrypting the segment."""
@@ -516,7 +529,20 @@ class _ProxyHandler(BaseHTTPRequestHandler):
 
                     out.append(line)
 
-                body = ("\n".join(out) + "\n").encode('utf-8')
+                # Join rewritten playlist and run cleanup after decryption/rewrites
+                out_text = "\n".join(out) + "\n"
+                out_text = clean_m3u8_text(out_text)
+                # Debug: print final playlist to console and log it at debug level
+                try:
+                    logger.debug("Final playlist being returned to player:\n%s", out_text)
+                except Exception:
+                    pass
+                try:
+                    print(out_text)
+                except Exception:
+                    pass
+
+                body = out_text.encode('utf-8')
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/vnd.apple.mpegurl')
                 self.send_header('Content-Length', str(len(body)))
