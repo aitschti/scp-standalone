@@ -537,10 +537,6 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                     logger.debug("Final playlist being returned to player:\n%s", out_text)
                 except Exception:
                     pass
-                try:
-                    print(out_text)
-                except Exception:
-                    pass
 
                 body = out_text.encode('utf-8')
                 self.send_response(200)
