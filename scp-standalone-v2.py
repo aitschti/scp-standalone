@@ -28,7 +28,7 @@ _global_session.mount('http://', adapter)
 FORWARD_HEADERS = {
     'Referer': 'https://stripchat.com/',
     'Origin': 'https://stripchat.com',
-    'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.182 Safari/537.36",
+    'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.138 Safari/537.36",
     'Accept': '*/*',
     'Accept-Language': 'en-US,en;q=0.9',
     'Accept-Encoding': 'gzip, deflate, br',
@@ -38,7 +38,8 @@ FORWARD_HEADERS = {
 }
 
 # API Endpoints
-API_ENDPOINT_MODEL = "https://stripchat.com/api/front/v2/models/username/{}/cam"
+API_ENDPOINT_MODEL_WITH_ID = "https://stripchat.com/api/front/v2/models/{}/cam"
+API_ENDPOINT_USERID = "https://stripchat.com/api/front/users/user-ids/{}"
 
 # M3U8 URL Template
 M3U8_BASE_URL = "https://edge-hls.doppiocdn.com/hls/{}/master/{}_auto.m3u8"
@@ -673,6 +674,31 @@ def get_proxy(port=None):
         _proxy_instance.start()
     return _proxy_instance
 
+def _resolve_user_id(username):
+    """Resolve a username to its model id. Returns None on failure."""
+    headers = {
+        "Referer": f"https://www.stripchat.com/{username}",
+        "User-Agent": FORWARD_HEADERS["User-Agent"]
+    }
+    try:
+        resp = _global_session.get(API_ENDPOINT_USERID.format(username), headers=headers, timeout=REQUEST_TIMEOUT)
+        try:
+            data = resp.json()
+        except ValueError:
+            data = None
+        if not isinstance(data, dict):
+            logger.error(f"Unexpected user id response for {username} (HTTP {resp.status_code})")
+            return None
+        user_id = data.get("id")
+        if not user_id:
+            # The API reports a missing/deleted profile as title + description
+            logger.error(f"No model id for {username}: {data.get('description', 'unknown reason')}")
+            return None
+        return str(user_id)
+    except Exception as e:
+        logger.error(f"Failed to resolve model id for {username}: {e}")
+        return None
+
 def fetch_stream_url(username):
     """Fetch the M3U8 URL for the given username."""
     # Strip .m3u8 from username if present
@@ -687,7 +713,12 @@ def fetch_stream_url(username):
         else:
             del _username_m3u8_cache[username]  # Expired, remove
     
-    api_url = API_ENDPOINT_MODEL.format(username)
+    # The username based cam endpoint is gone, resolve the model id first
+    user_id = _resolve_user_id(username)
+    if not user_id:
+        return None
+
+    api_url = API_ENDPOINT_MODEL_WITH_ID.format(user_id)
     headers = {
         "Content-Type": "application/x-www-form-urlencoded",
         "X-Requested-With": "XMLHttpRequest",
