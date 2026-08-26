@@ -9,6 +9,9 @@ import hashlib
 import re
 import os
 import time
+
+# Record startup time for health/endpoints
+START_TIME = time.time()
 import logging
 import argparse
 
@@ -99,23 +102,10 @@ def _mouflon_decrypt_b64(encrypted_b64: str, key: str) -> str:
     except Exception:
         return out.decode("latin-1", errors="ignore")
 
-def clean_m3u8_text(playlist: str) -> str:
-    """Remove lines that start with any prefix in `remove_prefixes`.
-    Preserves other lines and their original newline characters.
-    """
-    # List of prefixes to remove
-    # Comparison is case-insensitive.
-    remove_prefixes = ["#EXT-X-MOUFLON"]
-
-    # Keep original line endings using splitlines(keepends=True)
-    lines = playlist.splitlines(keepends=True)
-    cleaned_lines = []
-    for ln in lines:
-        stripped = ln.lstrip()
-        if any(stripped.lower().startswith(p.lower()) for p in remove_prefixes):
-            continue
-        cleaned_lines.append(ln)
-    return "".join(cleaned_lines)
+def _is_valid_decrypted_url(url: str) -> bool:
+    """Validate if the decrypted URL looks correct (e.g., ends with .mp4 and has part number)."""
+    pattern = r'^https://.*\.mp4$'
+    return bool(re.match(pattern, url))
 
 def _decode_m3u8_mouflon_files(m3u8_text: str) -> str:
     """Find '#EXT-X-MOUFLON:URI:<url>' (v2) lines and decode by reversing and decrypting the segment."""
@@ -250,6 +240,24 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         # Suppress default logging by doing nothing
         pass
 
+    def _send_json(self, code: int, payload: dict):
+        import json
+        body = json.dumps(payload).encode('utf-8')
+        self.send_response(code)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except Exception:
+            pass
+
+    def do_HEALTH(self):
+        import time
+        uptime = int(time.time() - START_TIME) if 'START_TIME' in globals() else 0
+        self._send_json(200, {"status": "ok", "uptime_seconds": uptime})
+
     def handle(self):
         """Override to catch Windows socket errors (10053/10054) during request handling."""
         try:
@@ -264,6 +272,10 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             logger.error(f"Unexpected error in request handler: {e}")
 
     def do_HEAD(self):
+        path = self.path
+        if path == '/health' or path == '/health/':
+            self.do_HEALTH()
+            return
         """Handle HEAD requests so clients can probe resources (avoid 501)."""
         path = self.path
         qs = urllib.parse.urlparse(path).query
@@ -341,6 +353,9 @@ class _ProxyHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path
+        if path == '/health' or path == '/health/':
+            self.do_HEALTH()
+            return
         qs = urllib.parse.urlparse(path).query
         params = urllib.parse.parse_qs(qs)
         
@@ -494,7 +509,8 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                         q['pkey'] = [pkey]
                     new_q = urllib.parse.urlencode({k: v[0] for k, v in q.items()})
                     abs2 = urllib.parse.urlunsplit((pr.scheme, pr.netloc, pr.path, new_q, pr.fragment))
-                    return f'http://{host}:{port}/?url=' + urllib.parse.quote(abs2, safe='')
+                    # Use relative URL so the client stays on the same domain (nginx handles TLS and routing)
+                    return '/?url=' + urllib.parse.quote(abs2, safe='')
 
                 def _rewrite_uri_attr(line: str) -> str:
                     m = re.search(r'URI=(?:"([^"]+)"|([^,]+))', line, flags=re.IGNORECASE)
@@ -530,16 +546,7 @@ class _ProxyHandler(BaseHTTPRequestHandler):
 
                     out.append(line)
 
-                # Join rewritten playlist and run cleanup after decryption/rewrites
-                out_text = "\n".join(out) + "\n"
-                out_text = clean_m3u8_text(out_text)
-                # Debug: print final playlist to console and log it at debug level
-                try:
-                    logger.debug("Final playlist being returned to player:\n%s", out_text)
-                except Exception:
-                    pass
-
-                body = out_text.encode('utf-8')
+                body = ("\n".join(out) + "\n").encode('utf-8')
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/vnd.apple.mpegurl')
                 self.send_header('Content-Length', str(len(body)))
